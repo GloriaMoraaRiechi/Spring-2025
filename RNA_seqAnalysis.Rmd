@@ -1,0 +1,172 @@
+---
+title: "RNA_seq Analysis"
+author: "moraa"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+data <- read.table("C:/Users/glori/Desktop/Class Project/GSE243694_all.genes.group.expression.annot.txt",
+                   header=TRUE, sep="\t", fill=TRUE, quote = "")
+head(data, 20)
+```
+
+```{r}
+#data
+```
+
+```{r}
+sum(duplicated(data[,1]))
+```
+
+```{r}
+rownames(data) <- data[,1]
+data <- data[,-1]  # Remove the now redundant first column
+```
+
+```{r}
+str(data)  # View data types of columns  
+head(data)  # View first few rows  
+summary(data)  # Get summary statistics  
+```
+
+# **Exploratory Analysis of GO Annotations**
+
+1. Load required libraries
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidytext)
+```
+
+Step 2: Count the Most Frequent GO Terms
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Function to process and plot GO terms
+plot_GO_terms <- function(data, column_name, title) {
+  data_long <- data %>%
+    separate_rows({{ column_name }}, sep = ";") %>%  # Split terms at semicolons
+    filter({{ column_name }} != "") %>%  # Remove empty values
+    count({{ column_name }}, sort = TRUE) %>%
+    top_n(20)  # Select top 20 most frequent terms
+
+  # Plot the GO term frequencies
+  ggplot(data_long, aes(x = reorder({{ column_name }}, n), y = n)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    coord_flip() +
+    labs(title = title, x = "GO Term", y = "Count") +
+    theme_minimal()
+}
+
+# Generate plots for GO Biological Process, Molecular Function, and Cellular Component
+plot_GO_terms(data, GO.Process, "Top 20 Biological Processes in GO Data")
+plot_GO_terms(data, GO.Function, "Top 20 Molecular Functions in GO Data")
+plot_GO_terms(data, GO.Component, "Top 20 Cellular Components in GO Data")
+
+```
+
+# Summary
+```{r}
+# Count occurrences of each GO term
+go_freq <- table(data$GO.Process)
+
+# Convert to dataframe and sort by frequency
+go_summary <- as.data.frame(go_freq)
+colnames(go_summary) <- c("GO_Term", "Frequency")
+go_summary <- go_summary[order(-go_summary$Frequency), ]
+
+# View top GO terms
+head(go_summary, 10)
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+# Statistical analysis function for GO terms
+analyze_GO_stats <- function(data) {
+  
+  # Clean and process GO terms
+  clean_terms <- function(column) {
+    data %>%
+      separate_rows({{ column }}, sep = ";") %>%
+      mutate(term = str_trim({{ column }}),
+             term = str_replace(term, "GO\\.[0-9]+//", "")) %>%
+      filter(term != "", !is.na(term)) %>%
+      count(term, name = "count", sort = TRUE)
+  }
+  
+  # Process all three categories
+  bp <- clean_terms(GO.Process) %>% mutate(category = "Biological Process")
+  mf <- clean_terms(GO.Function) %>% mutate(category = "Molecular Function")
+  cc <- clean_terms(GO.Component) %>% mutate(category = "Cellular Component")
+  
+  # Combine all data
+  combined <- bind_rows(bp, mf, cc) %>%
+    group_by(category) %>%
+    mutate(percentage = round(count / sum(count) * 100, 2),
+           rank = row_number())
+  
+  # Generate statistics
+  list(
+    # Overall summary
+    summary_stats = combined %>%
+      group_by(category) %>%
+      summarise(
+        total_terms = n(),
+        total_count = sum(count),
+        mean_count = mean(count),
+        median_count = median(count),
+        max_count = max(count),
+        min_count = min(count),
+        sd_count = sd(count),
+        .groups = "drop"
+      ),
+    
+    # Top 10 terms per category
+    top_terms = combined %>%
+      group_by(category) %>%
+      slice_max(count, n = 10) %>%
+      arrange(category, desc(count)),
+    
+    # Term concentration metrics
+    concentration = combined %>%
+      group_by(category) %>%
+      summarise(
+        shannon = -sum((count/sum(count)) * log(count/sum(count))),
+        simpson = 1/sum((count/sum(count))^2),
+        gini = ineq::Gini(count),  # Requires 'ineq' package
+        .groups = "drop"
+      ),
+    
+    # Full dataset
+    full_data = combined
+  )
+}
+
+# Run analysis on your 'data' dataframe
+go_stats <- analyze_GO_stats(data)
+
+# View results
+go_stats$summary_stats    # Basic counts and distribution stats
+go_stats$top_terms        # Most frequent terms
+go_stats$concentration    # Diversity/concentration metrics
+go_stats$full_data        # Complete processed data
+```
+
+```{r}
+# To identify dominant terms:
+go_stats$full_data %>% 
+  group_by(category) %>% 
+  filter(count > quantile(count, 0.99))  # Top 1% terms
+```
